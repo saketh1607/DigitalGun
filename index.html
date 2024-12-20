@@ -22,7 +22,9 @@
         let playerPosition = { lat: null, lon: null };
         
         // Initialize WebSocket for multiplayer
-        const socket = new WebSocket("ws://192.168.0.103:8080");
+        // const socket = new WebSocket("ws://192.168.0.103:8080");
+        const socket = new WebSocket("wss:digital-gun.vercel.app");
+// Updated to use wss
 
         socket.onopen = () => {
             console.log("Connected to the game server");
