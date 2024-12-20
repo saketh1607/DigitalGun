@@ -3,149 +3,349 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSocket Game</title>
-</head>
-<body>
-    <h1>WebSocket Game</h1>
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
-    <div id="status">Status: Waiting for actions...</div>
-    <div id="players">Player List: </div>
-    <div id="position">Position: </div>
-    <div id="azimuth">Azimuth: </div>
-    <button id="shoot">Shoot</button>
+    <title>Enhanced Location Game</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        canvas { background: #1a1b2e; }
+        #gameInterface {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            pointer-events: none;
+        }
+        .stats {
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px;
+            margin: 10px;
+            border-radius: 5px;
+            position: absolute;
+        }
+        #playerStats { top: 10px; left: 10px; }
+        #gameInfo { top: 10px; right: 10px; }
+        #leaderboard { top: 10px; left: 50%; transform: translateX(-50%); }
+        .health-bar {
+            width: 200px;
+            height: 20px;
+            background: #333;
+            margin: 5px 0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .health-bar div {
+            height: 100%;
+            background: linear-gradient(90deg, #ff0000, #ff4444);
+            transition: width 0.3s;
+        }
+        #shoot {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #ff4444;
+            border: none;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+    </style>
+
+    <canvas id="gameCanvas"></canvas>
+    <div id="gameInterface">
+        <div id="playerStats" class="stats">
+            <div>Health: <div class="health-bar"><div id="healthBar"></div></div></div>
+            <div>Score: <span id="scoreDisplay">0</span></div>
+            <div>Rank: <span id="rankDisplay">Rookie</span></div>
+        </div>
+        <div id="gameInfo" class="stats">
+            <div>Players Online: <span id="playerCount">0</span></div>
+            <div>Match Time: <span id="matchTime">5:00</span></div>
+        </div>
+        <div id="leaderboard" class="stats">
+            <h3>Top Players</h3>
+            <div id="leaderboardList"></div>
+        </div>
+        <button id="shoot">SHOOT</button>
+    </div>
 
     <script>
-        const players = {}; // Store player data
-        const playerId = Math.random().toString(36).substring(2, 9); // Unique ID for each player
-        
-        let playerAzimuth = null;
-        let playerPosition = { lat: null, lon: null };
-        
-        // Initialize WebSocket for multiplayer
-        // const socket = new WebSocket("ws://192.168.0.103:8080");
-        const  socket = new WebSocket('wss://server-gun.onrender.com');
-// Updated to use wss
-
-        socket.onopen = () => {
-            console.log("Connected to the game server");
-            // Register player
-            socket.send(JSON.stringify({ type: "register", id: playerId }));
-        };
-
-        socket.onerror = (error) => {
-            console.error("WebSocket Error:", error);
-        };
-
-        socket.onclose = (event) => {
-            console.log("WebSocket connection closed:", event);
-        };
-
-        // Handle messages from the server
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            console.log("Message from server:", data);
-            if (data.type === "updatePlayers") {
-                updatePlayerList(data.players);
-            } else if (data.type === "hit") {
-                if (data.target === playerId) {
-                    document.getElementById("status").textContent = "You've been hit!";
-                }
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.playerId = Math.random().toString(36).substr(2, 9);
+                this.players = {};
+                this.health = 100;
+                this.score = 0;
+                this.rank = 'Rookie';
+                this.effects = [];
+                
+                this.setupCanvas();
+                this.setupWebSocket();
+                this.setupControls();
+                this.setupGameLoop();
             }
-        };
 
-        // Update player list display
-        function updatePlayerList(newPlayers) {
-            console.log("Updating player list:", newPlayers);
-            Object.assign(players, newPlayers);
-            drawPlayers(players);
-            const playerList = Object.entries(players)
-                .map(([id, p]) => `${id}: Azimuth=${p.azimuth !== null ? p.azimuth : "N/A"}, Pos=[${p.lat !== null ? p.lat : "?"}, ${p.lon !== null ? p.lon : "?"}]`)
-                .join("<br>");
-            document.getElementById("players").innerHTML = playerList;
+            setupCanvas() {
+                const resize = () => {
+                    this.canvas.width = window.innerWidth;
+                    this.canvas.height = window.innerHeight;
+                };
+                window.addEventListener('resize', resize);
+                resize();
+            }
+
+            setupWebSocket() {
+        this.socket = new WebSocket("wss://server-gun.onrender.com");
+    this.socket.onopen = () => {
+        console.log("WebSocket connection established.");
+        this.socket.send(JSON.stringify({
+            type: 'register',
+            id: this.playerId
+        }));
+        console.log("Player registered with ID:", this.playerId);
+    };
+
+    this.socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log("Message received from server:", data);
+        this.handleServerMessage(data);
+    };
+
+    this.socket.onclose = () => {
+        console.log("WebSocket connection closed.");
+    };
+
+    this.socket.onerror = (error) => {
+        console.error("WebSocket error:", error);
+    };
+}
+
+setupControls() {
+    navigator.geolocation.watchPosition(
+        (position) => {
+            this.position = {
+                lat: position.coords.latitude,
+                lon: position.coords.longitude
+            };
+            console.log("Updated position - Lat:", this.position.lat, "Lon:", this.position.lon);
+            this.sendUpdate();
+        },
+        (error) => console.error('GPS Error:', error),
+        { enableHighAccuracy: true }
+    );
+
+    window.addEventListener('deviceorientationabsolute', (event) => {
+        if (event.alpha !== null) {
+            this.azimuth = event.alpha;
+            console.log("Updated azimuth angle:", this.azimuth);
+            this.sendUpdate();
         }
+    });
 
-        // Get compass angle (azimuth)
-        window.addEventListener("deviceorientationabsolute", (event) => {
-            console.log("Device orientation event:", event);
-            if (event.alpha !== null) {
-                playerAzimuth = event.alpha.toFixed(2); // Azimuth in degrees
-                console.log("Player azimuth:", playerAzimuth);
-                document.getElementById("azimuth").textContent = `Azimuth: ${playerAzimuth}°`;
-                sendPlayerData();
-            } else {
-                console.error("Azimuth data is null");
+    document.getElementById('shoot').addEventListener('click', () => {
+        console.log("Shoot button clicked.");
+        this.shoot();
+    });
+}
+
+            setupGameLoop() {
+                const gameLoop = () => {
+                    this.update();
+                    this.render();
+                    requestAnimationFrame(gameLoop);
+                };
+                gameLoop();
             }
-        });
 
-        // Get GPS position
-        navigator.geolocation.watchPosition(
-            (position) => {
-                console.log("Geolocation event:", position);
-                if (position.coords.latitude !== null && position.coords.longitude !== null) {
-                    playerPosition.lat = position.coords.latitude.toFixed(6);
-                    playerPosition.lon = position.coords.longitude.toFixed(6);
-                    console.log("Player position:", playerPosition);
-                    document.getElementById("position").textContent = `Position: Lat: ${playerPosition.lat}, Lon: ${playerPosition.lon}`;
-                    sendPlayerData();
-                } else {
-                    console.error("GPS position data is null");
-                }
-            },
-            (error) => {
-                console.error("GPS Error:", error);
-                alert("Please enable location services for this game to work.");
-            },
-            { enableHighAccuracy: true }
-        );
-
-        // Send player data to server
-        function sendPlayerData() {
-            if (playerAzimuth !== null && playerPosition.lat !== null && playerPosition.lon !== null) {
-                console.log("Sending player data:", {
-                    type: "update",
-                    id: playerId,
-                    azimuth: playerAzimuth,
-                    lat: playerPosition.lat,
-                    lon: playerPosition.lon,
+            update() {
+                // Update effects
+                this.effects = this.effects.filter(effect => {
+                    effect.lifetime -= 16; // 16ms per frame approx
+                    return effect.lifetime > 0;
                 });
-                socket.send(
-                    JSON.stringify({
-                        type: "update",
-                        id: playerId,
-                        azimuth: playerAzimuth,
-                        lat: playerPosition.lat,
-                        lon: playerPosition.lon,
-                    })
+
+                // Update UI
+                document.getElementById('healthBar').style.width = `${this.health}%`;
+                document.getElementById('scoreDisplay').textContent = this.score;
+                document.getElementById('rankDisplay').textContent = this.rank;
+                document.getElementById('playerCount').textContent = Object.keys(this.players).length;
+            }
+
+            render() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // Draw world grid
+                this.drawGrid();
+                
+                // Draw players
+                Object.entries(this.players).forEach(([id, player]) => {
+                    this.drawPlayer(player, id === this.playerId);
+                });
+
+                // Draw effects
+                this.effects.forEach(effect => this.drawEffect(effect));
+            }
+
+            drawGrid() {
+                this.ctx.strokeStyle = '#2a2a4a';
+                this.ctx.lineWidth = 1;
+                
+                const gridSize = 50;
+                const offsetX = this.canvas.width / 2 % gridSize;
+                const offsetY = this.canvas.height / 2 % gridSize;
+
+                for (let x = offsetX; x < this.canvas.width; x += gridSize) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x, 0);
+                    this.ctx.lineTo(x, this.canvas.height);
+                    this.ctx.stroke();
+                }
+
+                for (let y = offsetY; y < this.canvas.height; y += gridSize) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(0, y);
+                    this.ctx.lineTo(this.canvas.width, y);
+                    this.ctx.stroke();
+                }
+            }
+
+            drawPlayer(player, isCurrentPlayer) {
+                if (!player.lat || !player.lon) return;
+
+                // Convert GPS to screen coordinates
+                const x = (player.lon - this.position.lon) * 1000000 + this.canvas.width / 2;
+                const y = (this.position.lat - player.lat) * 1000000 + this.canvas.height / 2;
+
+                // Draw player circle
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, 20, 0, Math.PI * 2);
+                const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, 20);
+                gradient.addColorStop(0, isCurrentPlayer ? '#4CAF50' : '#FF5722');
+                gradient.addColorStop(1, isCurrentPlayer ? '#1B5E20' : '#BF360C');
+                this.ctx.fillStyle = gradient;
+                this.ctx.fill();
+
+                // Draw direction indicator
+                const angle = (player.azimuth || 0) * Math.PI / 180;
+                this.ctx.beginPath();
+                this.ctx.moveTo(x, y);
+                this.ctx.lineTo(
+                    x + Math.cos(angle) * 30,
+                    y + Math.sin(angle) * 30
                 );
+                this.ctx.strokeStyle = isCurrentPlayer ? '#81C784' : '#FF8A65';
+                this.ctx.lineWidth = 3;
+                this.ctx.stroke();
+
+                // Draw player name
+                this.ctx.font = '14px Arial';
+                this.ctx.fillStyle = '#fff';
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText(player.id, x, y - 30);
+            }
+
+            drawEffect(effect) {
+                switch (effect.type) {
+                    case 'shoot':
+                        const alpha = effect.lifetime / effect.maxLifetime;
+                        this.ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                        this.ctx.lineWidth = 2;
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(effect.x1, effect.y1);
+                        this.ctx.lineTo(effect.x2, effect.y2);
+                        this.ctx.stroke();
+                        break;
+                }
+            }
+
+            handleServerMessage(data) {
+    switch (data.type) {
+        case 'updatePlayers':
+            this.players = data.players;
+            console.log("Updated players:", this.players);
+            console.log("Player count:", Object.keys(this.players).length);
+            document.getElementById('playerCount').textContent = Object.keys(this.players).length;
+            break;
+        case 'hit':
+            if (data.target === this.playerId) {
+                this.health = Math.max(0, this.health - 10);
+                console.log("Player hit! New health:", this.health);
+                this.addDamageEffect();
+            }
+            break;
+    }
+}
+
+sendUpdate() {
+    if (this.socket.readyState === WebSocket.OPEN) {
+        this.socket.send(JSON.stringify({
+            type: 'update',
+            id: this.playerId,
+            lat: this.position?.lat,
+            lon: this.position?.lon,
+            azimuth: this.azimuth,
+            health: this.health
+        }));
+        console.log("Player state updated:", {
+            id: this.playerId,
+            lat: this.position?.lat,
+            lon: this.position?.lon,
+            azimuth: this.azimuth,
+            health: this.health
+        });
+    }
+}
+
+            shoot() {
+                if (this.socket.readyState === WebSocket.OPEN) {
+                    this.socket.send(JSON.stringify({
+                        type: 'shoot',
+                        shooter: this.playerId
+                    }));
+
+                    // Add shoot effect
+                    const centerX = this.canvas.width / 2;
+                    const centerY = this.canvas.height / 2;
+                    const angle = this.azimuth * Math.PI / 180;
+                    this.effects.push({
+                        type: 'shoot',
+                        x1: centerX,
+                        y1: centerY,
+                        x2: centerX + Math.cos(angle) * 1000,
+                        y2: centerY + Math.sin(angle) * 1000,
+                        lifetime: 500,
+                        maxLifetime: 500
+                    });
+                }
+            }
+
+            addDamageEffect() {
+                // Flash screen red when damaged
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.top = '0';
+                overlay.style.left = '0';
+                overlay.style.width = '100%';
+                overlay.style.height = '100%';
+                overlay.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+                overlay.style.pointerEvents = 'none';
+                overlay.style.transition = 'opacity 0.5s';
+                document.body.appendChild(overlay);
+                
+                setTimeout(() => {
+                    overlay.style.opacity = '0';
+                    setTimeout(() => overlay.remove(), 500);
+                }, 100);
             }
         }
 
-        // Periodically send player data to the server
-        setInterval(sendPlayerData, 100);
-
-        // Handle "Shoot" action
-        document.getElementById("shoot").addEventListener("click", () => {
-            console.log("Shoot button clicked");
-            socket.send(JSON.stringify({ type: "shoot", shooter: playerId }));
-            document.getElementById("status").textContent = "You shot!";
+        // Start the game when the page loads
+        window.addEventListener('load', () => {
+            const game = new Game();
         });
-
-        // Draw players on canvas
-        const canvas = document.getElementById("gameCanvas");
-        const ctx = canvas.getContext("2d");
-
-        function drawPlayers(players) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            Object.entries(players).forEach(([id, player]) => {
-                const x = player.lon * 10; // Scale for canvas display
-                const y = player.lat * 10; // Scale for canvas display
-                ctx.beginPath();
-                ctx.arc(x, y, 10, 0, 2 * Math.PI); // Example drawing
-                ctx.fillStyle = id === playerId ? "blue" : "red";
-                ctx.fill();
-                ctx.stroke();
-            });
-        }
     </script>
 </body>
 </html>
