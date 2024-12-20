@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Game</title>
+</head>
+<body>
+    <h1>WebSocket Game</h1>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="status">Status: Waiting for actions...</div>
+    <div id="players">Player List: </div>
+    <div id="position">Position: </div>
+    <div id="azimuth">Azimuth: </div>
+    <button id="shoot">Shoot</button>
+
+    <script>
+        const players = {}; // Store player data
+        const playerId = Math.random().toString(36).substring(2, 9); // Unique ID for each player
+        
+        let playerAzimuth = null;
+        let playerPosition = { lat: null, lon: null };
+        
+        // Initialize WebSocket for multiplayer
+        const socket = new WebSocket("ws://192.168.0.103:8080");
+
+        socket.onopen = () => {
+            console.log("Connected to the game server");
+            // Register player
+            socket.send(JSON.stringify({ type: "register", id: playerId }));
+        };
+
+        socket.onerror = (error) => {
+            console.error("WebSocket Error:", error);
+        };
+
+        socket.onclose = (event) => {
+            console.log("WebSocket connection closed:", event);
+        };
+
+        // Handle messages from the server
+        socket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log("Message from server:", data);
+            if (data.type === "updatePlayers") {
+                updatePlayerList(data.players);
+            } else if (data.type === "hit") {
+                if (data.target === playerId) {
+                    document.getElementById("status").textContent = "You've been hit!";
+                }
+            }
+        };
+
+        // Update player list display
+        function updatePlayerList(newPlayers) {
+            console.log("Updating player list:", newPlayers);
+            Object.assign(players, newPlayers);
+            drawPlayers(players);
+            const playerList = Object.entries(players)
+                .map(([id, p]) => `${id}: Azimuth=${p.azimuth !== null ? p.azimuth : "N/A"}, Pos=[${p.lat !== null ? p.lat : "?"}, ${p.lon !== null ? p.lon : "?"}]`)
+                .join("<br>");
+            document.getElementById("players").innerHTML = playerList;
+        }
+
+        // Get compass angle (azimuth)
+        window.addEventListener("deviceorientationabsolute", (event) => {
+            console.log("Device orientation event:", event);
+            if (event.alpha !== null) {
+                playerAzimuth = event.alpha.toFixed(2); // Azimuth in degrees
+                console.log("Player azimuth:", playerAzimuth);
+                document.getElementById("azimuth").textContent = `Azimuth: ${playerAzimuth}°`;
+                sendPlayerData();
+            } else {
+                console.error("Azimuth data is null");
+            }
+        });
+
+        // Get GPS position
+        navigator.geolocation.watchPosition(
+            (position) => {
+                console.log("Geolocation event:", position);
+                if (position.coords.latitude !== null && position.coords.longitude !== null) {
+                    playerPosition.lat = position.coords.latitude.toFixed(6);
+                    playerPosition.lon = position.coords.longitude.toFixed(6);
+                    console.log("Player position:", playerPosition);
+                    document.getElementById("position").textContent = `Position: Lat: ${playerPosition.lat}, Lon: ${playerPosition.lon}`;
+                    sendPlayerData();
+                } else {
+                    console.error("GPS position data is null");
+                }
+            },
+            (error) => {
+                console.error("GPS Error:", error);
+                alert("Please enable location services for this game to work.");
+            },
+            { enableHighAccuracy: true }
+        );
+
+        // Send player data to server
+        function sendPlayerData() {
+            if (playerAzimuth !== null && playerPosition.lat !== null && playerPosition.lon !== null) {
+                console.log("Sending player data:", {
+                    type: "update",
+                    id: playerId,
+                    azimuth: playerAzimuth,
+                    lat: playerPosition.lat,
+                    lon: playerPosition.lon,
+                });
+                socket.send(
+                    JSON.stringify({
+                        type: "update",
+                        id: playerId,
+                        azimuth: playerAzimuth,
+                        lat: playerPosition.lat,
+                        lon: playerPosition.lon,
+                    })
+                );
+            }
+        }
+
+        // Periodically send player data to the server
+        setInterval(sendPlayerData, 100);
+
+        // Handle "Shoot" action
+        document.getElementById("shoot").addEventListener("click", () => {
+            console.log("Shoot button clicked");
+            socket.send(JSON.stringify({ type: "shoot", shooter: playerId }));
+            document.getElementById("status").textContent = "You shot!";
+        });
+
+        // Draw players on canvas
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        function drawPlayers(players) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            Object.entries(players).forEach(([id, player]) => {
+                const x = player.lon * 10; // Scale for canvas display
+                const y = player.lat * 10; // Scale for canvas display
+                ctx.beginPath();
+                ctx.arc(x, y, 10, 0, 2 * Math.PI); // Example drawing
+                ctx.fillStyle = id === playerId ? "blue" : "red";
+                ctx.fill();
+                ctx.stroke();
+            });
+        }
+    </script>
+</body>
+</html>
