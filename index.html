@@ -82,10 +82,14 @@
                 this.score = 0;
                 this.rank = 'Rookie';
                 this.effects = [];
-                this.lastUpdate = 0;
-                this.updateInterval = 2000; // 2 seconds in milliseconds
-                this.pendingUpdate = false;
                 
+                // Throttling properties
+                this.lastUpdate = 0;
+                this.updateInterval = 2000; // 2 seconds
+                this.pendingUpdate = false;
+                this.position = { lat: null, lon: null };
+                this.azimuth = null;
+
                 this.setupCanvas();
                 this.setupWebSocket();
                 this.setupControls();
@@ -102,16 +106,14 @@
             }
 
             setupWebSocket() {
-                this.socket = new WebSocket("wss://server-gun.onrender.com");
+                this.socket = new WebSocket('wss://server-gun.onrender.com');
                 
-
                 this.socket.onopen = () => {
-                    console.log("WebSocket connection established.");
+                    console.log("Connected to the game server");
                     this.socket.send(JSON.stringify({
                         type: 'register',
                         id: this.playerId
                     }));
-                    console.log("Player registered with ID:", this.playerId);
                 };
 
                 this.socket.onmessage = (event) => {
@@ -121,11 +123,11 @@
                 };
 
                 this.socket.onclose = () => {
-                    console.log("WebSocket connection closed.");
+                    console.log("WebSocket connection closed");
                 };
 
                 this.socket.onerror = (error) => {
-                    console.error("WebSocket error:", error);
+                    console.error("WebSocket Error:", error);
                 };
             }
 
@@ -152,7 +154,7 @@
                 });
 
                 document.getElementById('shoot').addEventListener('click', () => {
-                    console.log("Shoot button clicked.");
+                    console.log("Shoot button clicked");
                     this.shoot();
                 });
             }
@@ -180,13 +182,7 @@
                         azimuth: this.azimuth,
                         health: this.health
                     }));
-                    console.log("Player state updated:", {
-                        id: this.playerId,
-                        lat: this.position?.lat,
-                        lon: this.position?.lon,
-                        azimuth: this.azimuth,
-                        health: this.health
-                    });
+                    console.log("Player state updated");
                     
                     this.lastUpdate = now;
                     this.pendingUpdate = false;
@@ -203,19 +199,16 @@
             }
 
             update() {
-                // Check if we should send an update
                 if (this.pendingUpdate) {
                     this.sendUpdate();
                 }
 
-                // Update effects
                 this.effects = this.effects.filter(effect => {
-                    effect.lifetime -= 16; // 16ms per frame approx
+                    effect.lifetime -= 16;
                     return effect.lifetime > 0;
                 });
 
-                // Update UI
-                document.getElementById('healthBar').style.width = ${this.health}%;
+                document.getElementById('healthBar').style.width = `${this.health}%`;
                 document.getElementById('scoreDisplay').textContent = this.score;
                 document.getElementById('rankDisplay').textContent = this.rank;
                 document.getElementById('playerCount').textContent = Object.keys(this.players).length;
@@ -223,16 +216,12 @@
 
             render() {
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-                
-                // Draw world grid
                 this.drawGrid();
                 
-                // Draw players
                 Object.entries(this.players).forEach(([id, player]) => {
                     this.drawPlayer(player, id === this.playerId);
                 });
 
-                // Draw effects
                 this.effects.forEach(effect => this.drawEffect(effect));
             }
 
@@ -262,11 +251,9 @@
             drawPlayer(player, isCurrentPlayer) {
                 if (!player.lat || !player.lon) return;
 
-                // Convert GPS to screen coordinates
                 const x = (player.lon - this.position.lon) * 1000000 + this.canvas.width / 2;
                 const y = (this.position.lat - player.lat) * 1000000 + this.canvas.height / 2;
 
-                // Draw player circle
                 this.ctx.beginPath();
                 this.ctx.arc(x, y, 20, 0, Math.PI * 2);
                 const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, 20);
@@ -275,7 +262,6 @@
                 this.ctx.fillStyle = gradient;
                 this.ctx.fill();
 
-                // Draw direction indicator
                 const angle = (player.azimuth || 0) * Math.PI / 180;
                 this.ctx.beginPath();
                 this.ctx.moveTo(x, y);
@@ -287,7 +273,6 @@
                 this.ctx.lineWidth = 3;
                 this.ctx.stroke();
 
-                // Draw player name
                 this.ctx.font = '14px Arial';
                 this.ctx.fillStyle = '#fff';
                 this.ctx.textAlign = 'center';
@@ -298,7 +283,7 @@
                 switch (effect.type) {
                     case 'shoot':
                         const alpha = effect.lifetime / effect.maxLifetime;
-                        this.ctx.strokeStyle = rgba(255, 255, 255, ${alpha});
+                        this.ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
                         this.ctx.lineWidth = 2;
                         this.ctx.beginPath();
                         this.ctx.moveTo(effect.x1, effect.y1);
@@ -312,14 +297,10 @@
                 switch (data.type) {
                     case 'updatePlayers':
                         this.players = data.players;
-                        console.log("Updated players:", this.players);
-                        console.log("Player count:", Object.keys(this.players).length);
-                        document.getElementById('playerCount').textContent = Object.keys(this.players).length;
                         break;
                     case 'hit':
                         if (data.target === this.playerId) {
                             this.health = Math.max(0, this.health - 10);
-                            console.log("Player hit! New health:", this.health);
                             this.addDamageEffect();
                         }
                         break;
@@ -333,7 +314,6 @@
                         shooter: this.playerId
                     }));
 
-                    // Add shoot effect
                     const centerX = this.canvas.width / 2;
                     const centerY = this.canvas.height / 2;
                     const angle = this.azimuth * Math.PI / 180;
@@ -350,7 +330,6 @@
             }
 
             addDamageEffect() {
-                // Flash screen red when damaged
                 const overlay = document.createElement('div');
                 overlay.style.position = 'fixed';
                 overlay.style.top = '0';
@@ -369,7 +348,6 @@
             }
         }
 
-        // Start the game when the page loads
         window.addEventListener('load', () => {
             const game = new Game();
         });
