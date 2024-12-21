@@ -53,6 +53,7 @@
     </style>
 </head>
 <body>
+    <p class="azi">0</p>
     <canvas id="gameCanvas"></canvas>
     <div id="gameInterface">
         <div id="playerStats" class="stats">
@@ -147,10 +148,12 @@
 
                 window.addEventListener('deviceorientationabsolute', (event) => {
                     if (event.alpha !== null) {
-                        this.azimuth = event.alpha;
-                        console.log("Updated azimuth angle:", this.azimuth);
-                        this.queueUpdate();
-                    }
+    this.azimuth = event.alpha;
+    document.querySelector(".azi").innerHTML = `${this.azimuth}`;
+    console.log("Updated azimuth angle:", this.azimuth);
+    this.queueUpdate();
+}
+
                 });
 
                 document.getElementById('shoot').addEventListener('click', () => {
