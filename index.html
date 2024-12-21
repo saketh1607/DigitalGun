@@ -51,9 +51,7 @@
             pointer-events: auto;
         }
     </style>
-</head>
-<body>
-    <p class="azi">0</p>
+
     <canvas id="gameCanvas"></canvas>
     <div id="gameInterface">
         <div id="playerStats" class="stats">
@@ -83,14 +81,8 @@
                 this.score = 0;
                 this.rank = 'Rookie';
                 this.effects = [];
-                
-                // Throttling properties
-                this.lastUpdate = 0;
-                this.updateInterval = 1000; // 2 seconds
-                this.pendingUpdate = false;
-                this.position = { lat: null, lon: null };
-                this.azimuth = null;
-
+                this.shootSound = new Audio('bullet.mp3'); // Replace with local file
+                // this.damageSound = new Audio('https://example.com/damage-sound.mp3'); // Replace with local file
                 this.setupCanvas();
                 this.setupWebSocket();
                 this.setupControls();
@@ -107,90 +99,77 @@
             }
 
             setupWebSocket() {
-                this.socket = new WebSocket('wss://server-gun.onrender.com');
                 
-                this.socket.onopen = () => {
-                    console.log("Connected to the game server");
-                    this.socket.send(JSON.stringify({
-                        type: 'register',
-                        id: this.playerId
-                    }));
-                };
 
-                this.socket.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    console.log("Message received from server:", data);
-                    this.handleServerMessage(data);
-                };
+    this.socket = new WebSocket('wss://server-gun.onrender.com');
+    this.socket.onopen = () => {
+        console.log("WebSocket connection established.");
+        this.socket.send(JSON.stringify({
+            type: 'register',
+            id: this.playerId
+        }));
+        console.log("Player registered with ID:", this.playerId);
+    };
 
-                this.socket.onclose = () => {
-                    console.log("WebSocket connection closed");
-                };
+    this.socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log("Message received from server:", data);
+        this.handleServerMessage(data);
+    };
 
-                this.socket.onerror = (error) => {
-                    console.error("WebSocket Error:", error);
-                };
-            }
+    this.socket.onclose = () => {
+        console.log("WebSocket connection closed.");
+    };
 
-            setupControls() {
-                navigator.geolocation.watchPosition(
-                    (position) => {
-                        this.position = {
-                            lat: position.coords.latitude,
-                            lon: position.coords.longitude
-                        };
-                        console.log("Updated position - Lat:", this.position.lat, "Lon:", this.position.lon);
-                        this.queueUpdate();
-                    },
-                    (error) => console.error('GPS Error:', error),
-                    { enableHighAccuracy: true }
-                );
-
-                window.addEventListener('deviceorientationabsolute', (event) => {
-                    if (event.alpha !== null) {
-    this.azimuth = event.alpha;
-    document.querySelector(".azi").innerHTML = `${this.azimuth}`;
-    console.log("Updated azimuth angle:", this.azimuth);
-    this.queueUpdate();
+    this.socket.onerror = (error) => {
+        console.error("WebSocket error:", error);
+    };
 }
 
-                });
+setupControls() {
+    navigator.geolocation.watchPosition(
+        (position) => {
+            this.position = {
+                lat: position.coords.latitude,
+                lon: position.coords.longitude
+            };
+            console.log("Updated position - Lat:", this.position.lat, "Lon:", this.position.lon);
+            this.sendUpdate();
+        },
+        (error) => console.error('GPS Error:', error),
+        { enableHighAccuracy: true }
+    );
 
-                document.getElementById('shoot').addEventListener('click', () => {
-                    console.log("Shoot button clicked");
-                    this.shoot();
-                });
-            }
+    window.addEventListener('deviceorientationabsolute', (event) => {
+        if (event.alpha !== null) {
+            this.azimuth = event.alpha;
+            console.log("Updated azimuth angle:", this.azimuth);
+            this.sendUpdate();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+    if (event.key === 'VolumeUp') { // 'VolumeUp' may vary depending on the browser
+        console.log('Volume Up pressed');
+        this.shoot();
+        event.preventDefault(); // Prevent default volume control
+    }
+    else if(event.code === 'Space'){
+        console.log('Volume Up pressed');
+        this.shoot();
+    }
+     else if (event.key === 'VolumeDown') {
+        console.log('Volume Down pressed');
+        event.preventDefault(); // Prevent default volume control
+    }
+});
 
-            queueUpdate() {
-                this.pendingUpdate = true;
-                const now = Date.now();
-                if (now - this.lastUpdate >= this.updateInterval) {
-                    this.sendUpdate();
-                }
-            }
-
-            sendUpdate() {
-                if (!this.pendingUpdate) return;
-                
-                const now = Date.now();
-                if (now - this.lastUpdate < this.updateInterval) return;
-
-                if (this.socket.readyState === WebSocket.OPEN) {
-                    this.socket.send(JSON.stringify({
-                        type: 'update',
-                        id: this.playerId,
-                        lat: this.position?.lat,
-                        lon: this.position?.lon,
-                        azimuth: this.azimuth,
-                        health: this.health
-                    }));
-                    console.log("Player state updated");
-                    
-                    this.lastUpdate = now;
-                    this.pendingUpdate = false;
-                }
-            }
+    document.getElementById('shoot').addEventListener('click', () => {
+        this.shootSound.currentTime = 0;
+        this.shootSound.play();
+        console.log("Shoot button clicked.");
+        this.shoot();
+    });
+}
 
             setupGameLoop() {
                 const gameLoop = () => {
@@ -202,15 +181,13 @@
             }
 
             update() {
-                if (this.pendingUpdate) {
-                    this.sendUpdate();
-                }
-
+                // Update effects
                 this.effects = this.effects.filter(effect => {
-                    effect.lifetime -= 16;
+                    effect.lifetime -= 16; // 16ms per frame approx
                     return effect.lifetime > 0;
                 });
 
+                // Update UI
                 document.getElementById('healthBar').style.width = `${this.health}%`;
                 document.getElementById('scoreDisplay').textContent = this.score;
                 document.getElementById('rankDisplay').textContent = this.rank;
@@ -219,12 +196,16 @@
 
             render() {
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // Draw world grid
                 this.drawGrid();
                 
+                // Draw players
                 Object.entries(this.players).forEach(([id, player]) => {
                     this.drawPlayer(player, id === this.playerId);
                 });
 
+                // Draw effects
                 this.effects.forEach(effect => this.drawEffect(effect));
             }
 
@@ -254,9 +235,11 @@
             drawPlayer(player, isCurrentPlayer) {
                 if (!player.lat || !player.lon) return;
 
+                // Convert GPS to screen coordinates
                 const x = (player.lon - this.position.lon) * 1000000 + this.canvas.width / 2;
                 const y = (this.position.lat - player.lat) * 1000000 + this.canvas.height / 2;
 
+                // Draw player circle
                 this.ctx.beginPath();
                 this.ctx.arc(x, y, 20, 0, Math.PI * 2);
                 const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, 20);
@@ -265,6 +248,7 @@
                 this.ctx.fillStyle = gradient;
                 this.ctx.fill();
 
+                // Draw direction indicator
                 const angle = (player.azimuth || 0) * Math.PI / 180;
                 this.ctx.beginPath();
                 this.ctx.moveTo(x, y);
@@ -276,6 +260,7 @@
                 this.ctx.lineWidth = 3;
                 this.ctx.stroke();
 
+                // Draw player name
                 this.ctx.font = '14px Arial';
                 this.ctx.fillStyle = '#fff';
                 this.ctx.textAlign = 'center';
@@ -297,26 +282,53 @@
             }
 
             handleServerMessage(data) {
-                switch (data.type) {
-                    case 'updatePlayers':
-                        this.players = data.players;
-                        break;
-                    case 'hit':
-                        if (data.target === this.playerId) {
-                            this.health = Math.max(0, this.health - 10);
-                            this.addDamageEffect();
-                        }
-                        break;
-                }
+    switch (data.type) {
+        case 'updatePlayers':
+            this.players = data.players;
+            console.log("Updated players:", this.players);
+            console.log("Player count:", Object.keys(this.players).length);
+            document.getElementById('playerCount').textContent = Object.keys(this.players).length;
+            break;
+        case 'hit':
+            if (data.target === this.playerId) {
+                this.health = Math.max(0, this.health - 10);
+                console.log("Player hit! New health:", this.health);
+                // this.damageSound.play();
+                this.addDamageEffect();
             }
+            break;
+    }
+}
+
+sendUpdate() {
+    if (this.socket.readyState === WebSocket.OPEN) {
+        this.socket.send(JSON.stringify({
+            type: 'update',
+            id: this.playerId,
+            lat: this.position?.lat,
+            lon: this.position?.lon,
+            azimuth: this.azimuth,
+            health: this.health
+        }));
+        console.log("Player state updated:", {
+            id: this.playerId,
+            lat: this.position?.lat,
+            lon: this.position?.lon,
+            azimuth: this.azimuth,
+            health: this.health
+        });
+    }
+}
 
             shoot() {
                 if (this.socket.readyState === WebSocket.OPEN) {
+                    
                     this.socket.send(JSON.stringify({
                         type: 'shoot',
                         shooter: this.playerId
                     }));
 
+                    // Add shoot effect
                     const centerX = this.canvas.width / 2;
                     const centerY = this.canvas.height / 2;
                     const angle = this.azimuth * Math.PI / 180;
@@ -333,6 +345,7 @@
             }
 
             addDamageEffect() {
+                // Flash screen red when damaged
                 const overlay = document.createElement('div');
                 overlay.style.position = 'fixed';
                 overlay.style.top = '0';
@@ -351,6 +364,7 @@
             }
         }
 
+        // Start the game when the page loads
         window.addEventListener('load', () => {
             const game = new Game();
         });
