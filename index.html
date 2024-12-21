@@ -51,7 +51,8 @@
             pointer-events: auto;
         }
     </style>
-
+</head>
+<body>
     <canvas id="gameCanvas"></canvas>
     <div id="gameInterface">
         <div id="playerStats" class="stats">
@@ -81,6 +82,9 @@
                 this.score = 0;
                 this.rank = 'Rookie';
                 this.effects = [];
+                this.lastUpdate = 0;
+                this.updateInterval = 2000; // 2 seconds in milliseconds
+                this.pendingUpdate = false;
                 
                 this.setupCanvas();
                 this.setupWebSocket();
@@ -98,58 +102,94 @@
             }
 
             setupWebSocket() {
-        this.socket = new WebSocket("wss://server-gun.onrender.com");
-    this.socket.onopen = () => {
-        console.log("WebSocket connection established.");
-        this.socket.send(JSON.stringify({
-            type: 'register',
-            id: this.playerId
-        }));
-        console.log("Player registered with ID:", this.playerId);
-    };
+                this.socket = new WebSocket("ws://192.168.0.103:8080");
+                this.socket.onopen = () => {
+                    console.log("WebSocket connection established.");
+                    this.socket.send(JSON.stringify({
+                        type: 'register',
+                        id: this.playerId
+                    }));
+                    console.log("Player registered with ID:", this.playerId);
+                };
 
-    this.socket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log("Message received from server:", data);
-        this.handleServerMessage(data);
-    };
+                this.socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    console.log("Message received from server:", data);
+                    this.handleServerMessage(data);
+                };
 
-    this.socket.onclose = () => {
-        console.log("WebSocket connection closed.");
-    };
+                this.socket.onclose = () => {
+                    console.log("WebSocket connection closed.");
+                };
 
-    this.socket.onerror = (error) => {
-        console.error("WebSocket error:", error);
-    };
-}
+                this.socket.onerror = (error) => {
+                    console.error("WebSocket error:", error);
+                };
+            }
 
-setupControls() {
-    navigator.geolocation.watchPosition(
-        (position) => {
-            this.position = {
-                lat: position.coords.latitude,
-                lon: position.coords.longitude
-            };
-            console.log("Updated position - Lat:", this.position.lat, "Lon:", this.position.lon);
-            this.sendUpdate();
-        },
-        (error) => console.error('GPS Error:', error),
-        { enableHighAccuracy: true }
-    );
+            setupControls() {
+                navigator.geolocation.watchPosition(
+                    (position) => {
+                        this.position = {
+                            lat: position.coords.latitude,
+                            lon: position.coords.longitude
+                        };
+                        console.log("Updated position - Lat:", this.position.lat, "Lon:", this.position.lon);
+                        this.queueUpdate();
+                    },
+                    (error) => console.error('GPS Error:', error),
+                    { enableHighAccuracy: true }
+                );
 
-    window.addEventListener('deviceorientationabsolute', (event) => {
-        if (event.alpha !== null) {
-            this.azimuth = event.alpha;
-            console.log("Updated azimuth angle:", this.azimuth);
-            this.sendUpdate();
-        }
-    });
+                window.addEventListener('deviceorientationabsolute', (event) => {
+                    if (event.alpha !== null) {
+                        this.azimuth = event.alpha;
+                        console.log("Updated azimuth angle:", this.azimuth);
+                        this.queueUpdate();
+                    }
+                });
 
-    document.getElementById('shoot').addEventListener('click', () => {
-        console.log("Shoot button clicked.");
-        this.shoot();
-    });
-}
+                document.getElementById('shoot').addEventListener('click', () => {
+                    console.log("Shoot button clicked.");
+                    this.shoot();
+                });
+            }
+
+            queueUpdate() {
+                this.pendingUpdate = true;
+                const now = Date.now();
+                if (now - this.lastUpdate >= this.updateInterval) {
+                    this.sendUpdate();
+                }
+            }
+
+            sendUpdate() {
+                if (!this.pendingUpdate) return;
+                
+                const now = Date.now();
+                if (now - this.lastUpdate < this.updateInterval) return;
+
+                if (this.socket.readyState === WebSocket.OPEN) {
+                    this.socket.send(JSON.stringify({
+                        type: 'update',
+                        id: this.playerId,
+                        lat: this.position?.lat,
+                        lon: this.position?.lon,
+                        azimuth: this.azimuth,
+                        health: this.health
+                    }));
+                    console.log("Player state updated:", {
+                        id: this.playerId,
+                        lat: this.position?.lat,
+                        lon: this.position?.lon,
+                        azimuth: this.azimuth,
+                        health: this.health
+                    });
+                    
+                    this.lastUpdate = now;
+                    this.pendingUpdate = false;
+                }
+            }
 
             setupGameLoop() {
                 const gameLoop = () => {
@@ -161,6 +201,11 @@ setupControls() {
             }
 
             update() {
+                // Check if we should send an update
+                if (this.pendingUpdate) {
+                    this.sendUpdate();
+                }
+
                 // Update effects
                 this.effects = this.effects.filter(effect => {
                     effect.lifetime -= 16; // 16ms per frame approx
@@ -168,7 +213,7 @@ setupControls() {
                 });
 
                 // Update UI
-                document.getElementById('healthBar').style.width = `${this.health}%`;
+                document.getElementById('healthBar').style.width = ${this.health}%;
                 document.getElementById('scoreDisplay').textContent = this.score;
                 document.getElementById('rankDisplay').textContent = this.rank;
                 document.getElementById('playerCount').textContent = Object.keys(this.players).length;
@@ -251,7 +296,7 @@ setupControls() {
                 switch (effect.type) {
                     case 'shoot':
                         const alpha = effect.lifetime / effect.maxLifetime;
-                        this.ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                        this.ctx.strokeStyle = rgba(255, 255, 255, ${alpha});
                         this.ctx.lineWidth = 2;
                         this.ctx.beginPath();
                         this.ctx.moveTo(effect.x1, effect.y1);
@@ -262,42 +307,22 @@ setupControls() {
             }
 
             handleServerMessage(data) {
-    switch (data.type) {
-        case 'updatePlayers':
-            this.players = data.players;
-            console.log("Updated players:", this.players);
-            console.log("Player count:", Object.keys(this.players).length);
-            document.getElementById('playerCount').textContent = Object.keys(this.players).length;
-            break;
-        case 'hit':
-            if (data.target === this.playerId) {
-                this.health = Math.max(0, this.health - 10);
-                console.log("Player hit! New health:", this.health);
-                this.addDamageEffect();
+                switch (data.type) {
+                    case 'updatePlayers':
+                        this.players = data.players;
+                        console.log("Updated players:", this.players);
+                        console.log("Player count:", Object.keys(this.players).length);
+                        document.getElementById('playerCount').textContent = Object.keys(this.players).length;
+                        break;
+                    case 'hit':
+                        if (data.target === this.playerId) {
+                            this.health = Math.max(0, this.health - 10);
+                            console.log("Player hit! New health:", this.health);
+                            this.addDamageEffect();
+                        }
+                        break;
+                }
             }
-            break;
-    }
-}
-
-sendUpdate() {
-    if (this.socket.readyState === WebSocket.OPEN) {
-        this.socket.send(JSON.stringify({
-            type: 'update',
-            id: this.playerId,
-            lat: this.position?.lat,
-            lon: this.position?.lon,
-            azimuth: this.azimuth,
-            health: this.health
-        }));
-        console.log("Player state updated:", {
-            id: this.playerId,
-            lat: this.position?.lat,
-            lon: this.position?.lon,
-            azimuth: this.azimuth,
-            health: this.health
-        });
-    }
-}
 
             shoot() {
                 if (this.socket.readyState === WebSocket.OPEN) {
